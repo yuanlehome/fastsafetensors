@@ -39,7 +39,7 @@ class GdsFileCopier:
             aligned_length = length + head_bytes
         aligned_offset = offset - head_bytes
 
-        gbuf = alloc_tensor_memory(aligned_length, self.device)
+        gbuf = alloc_tensor_memory(aligned_length, self.device, self.metadata.framework)
         if use_buf_register:
             count = 0
             while count < aligned_length:

@@ -175,7 +175,7 @@ class LazyTensorFactory:
     def free_dev_ptrs(self):
         self.tensors = {}
         if self.gbuf is not None:
-            free_tensor_memory(self.gbuf, self.device)
+            free_tensor_memory(self.gbuf, self.device, self.metadata.framework)
             self.gbuf = None
 
     def shuffle_all(self, pg: dist.ProcessGroup, tensor_shard_dim: OrderedDict[str, int])->Tuple[int, Dict[str, torch.Tensor]]:

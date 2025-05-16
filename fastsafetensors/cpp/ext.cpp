@@ -129,6 +129,8 @@ static void load_nvidia_functions() {
             mydlsym(&fs->cudaHostAlloc, handle_cudart, "cudaHostAlloc");
             mydlsym(&fs->cudaFreeHost, handle_cudart, "cudaFreeHost");
             mydlsym(&fs->cudaDeviceGetPCIBusId, handle_cudart, "cudaDeviceGetPCIBusId");
+            mydlsym(&fs->cudaDeviceMalloc, handle_cudart, "cudaMalloc");
+            mydlsym(&fs->cudaDeviceFree, handle_cudart, "cudaFree");
             bool success = fs->cudaMemcpy && fs->cudaDeviceSynchronize && fs->cudaHostAlloc && fs->cudaFreeHost && fs->cudaDeviceGetPCIBusId;
             if (!success) {
                 use_cuda = false;
@@ -325,6 +327,18 @@ uintptr_t cpu_malloc(uint64_t length) {
 void cpu_free(uintptr_t addr) {
     void *p = reinterpret_cast<void *>(addr);
     free(p);
+}
+
+uintptr_t gpu_malloc(uint64_t length) {
+    void *p;
+    if (fns.cudaDeviceMalloc(&p, length) != cudaSuccess) {
+        return 0;
+    }
+    return reinterpret_cast<uintptr_t>(p);
+}
+
+void gpu_free(uintptr_t addr) {
+    fns.cudaDeviceFree(reinterpret_cast<void*>(addr));
 }
 
 const int gds_device_buffer::cufile_register(uint64_t offset, uint64_t length) {
@@ -697,6 +711,8 @@ PYBIND11_MODULE(__MOD_NAME__, m)
     m.def("read_buffer", &read_buffer);
     m.def("cpu_malloc", &cpu_malloc);
     m.def("cpu_free", &cpu_free);
+    m.def("gpu_malloc", &gpu_malloc);
+    m.def("gpu_free", &gpu_free);
     m.def("load_nvidia_functions", &load_nvidia_functions);
 
     pybind11::class_<gds_device_buffer>(m, "gds_device_buffer")

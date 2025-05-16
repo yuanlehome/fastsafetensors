@@ -3,6 +3,8 @@
 
 import torch
 import torch.distributed as dist
+import paddle
+import paddle.distributed as pdist
 import os
 import math
 from . import cpp as fstcpp
@@ -13,6 +15,8 @@ from .tensor_factory import LazyTensorFactory
 from .file_buffer import FilesBufferOnDevice
 
 initialized: bool = False
+
+support_framework = ["pytorch","paddle"]
 
 class SafeTensorsFileLoader:
     r""" Load .safetensors files lazily.
@@ -35,7 +39,9 @@ class SafeTensorsFileLoader:
         >> print(bufs.get_tensor(loader.get_keys()[0]))
         >> loader.close()
     """
-    def __init__(self, pg: dist.ProcessGroup, device: torch.device, bbuf_size_kb: int = 16 * 1024, max_pinned_memory_in_kb: int = 64 * 1024 * 1024, max_threads: int=16, nogds: bool=False, debug_log: bool=False):
+    def __init__(self, pg: dist.ProcessGroup, device: torch.device, bbuf_size_kb: int = 16 * 1024, max_pinned_memory_in_kb: int = 64 * 1024 * 1024, max_threads: int=16, nogds: bool=False, debug_log: bool=False, framework="pytorch"):
+        if framework not in support_framework:
+            raise NotImplementedError(f"fastsafetensors only supports {support_framework} framework")
         self.device = device
         self.debug_log = debug_log
         self.meta: Dict[str, Tuple[SafeTensorsMetadata, int]] = {}
@@ -43,13 +49,26 @@ class SafeTensorsFileLoader:
         self.frames: OrderedDict[str, TensorFrame] = {}
         self.pg = pg
         self.nogds = nogds
+        self.framework = framework
         global initialized
         if not initialized:
             fstcpp.load_nvidia_functions()
-            if device.type == "cpu":
-                fstcpp.set_cpumode()
+            if self.framework == "pytorch":
+                if device.type == "cpu":
+                    fstcpp.set_cpumode()
+            elif self.framework == "paddle":
+                if device == "cpu":
+                    fstcpp.set_cpumode()
             fstcpp.set_debug_log(debug_log)
-            node = get_device_numa_node(device.index)
+            if self.framework == "pytorch":
+                d_id = device.index
+            elif self.framework == "paddle":
+                if device == "cpu":
+                    d_id = None
+                else:
+                    d_id = device.split(":") # "gpu:0" or "gpu"
+                    d_id = int(d_id[1]) if len(d_id) == 2 else 0
+            node = get_device_numa_node(d_id)
             if node is not None:
                 fstcpp.set_numa_node(node)
             if False and not nogds: # TODO: init_gds should be called but too slow for parallel initialization
@@ -90,7 +109,7 @@ class SafeTensorsFileLoader:
                 next_idx = rank_next_idx[rank]
                 if next_idx < len(filenames[rank]):
                     realpath = filenames[rank][next_idx] #os.path.realpath(filename)
-                    metadata = SafeTensorsMetadata.from_file(realpath)
+                    metadata = SafeTensorsMetadata.from_file(realpath, self.framework)
                     self.meta[realpath] = (metadata, rank)
                     self.frames.update(metadata.tensors)
                     if self.debug_log and rank == self.pg.rank():
@@ -105,8 +124,12 @@ class SafeTensorsFileLoader:
         At this moment, we do not instantiate tensors but just creating copies at device buffers with or without GDS.
         Users can instantiate and/or partition tensors with FilesBufferOnDevice returned by this function.
         """
-        if self.device.type != "cpu":
-            torch.cuda.set_device(self.device)
+        if self.framework == "pytorch":
+            if self.device.type != "cpu":
+                torch.cuda.set_device(self.device)
+        elif self.framework == "paddle":
+            if self.device != paddle.CPUPlace():
+                paddle.set_device(self.device)
 
         need_wait: List[LazyTensorFactory] = []
         factories: Dict[int, List[LazyTensorFactory]] = {}
