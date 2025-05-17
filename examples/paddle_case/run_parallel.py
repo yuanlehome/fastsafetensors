@@ -15,11 +15,10 @@ import paddle.distributed as dist
 from fastsafetensors import SafeTensorsFileLoader
 dist.init_parallel_env()
 word_size = dist.get_world_size()
-pg = dist.new_group(range(word_size),backend="gloo")
-device = "cpu"
-root_path  = "/workspace/fastsafetensors/examples/paddle_case"
+pg = dist.new_group(range(word_size))
+device = "gpu:0" if paddle.is_compiled_with_cuda() else "cpu"
 loader = SafeTensorsFileLoader(pg, device, nogds=True, debug_log=True, framework="paddle")
-loader.add_filenames({0: [f"a_paddle.safetensors"], 1:[f"b_paddle.safetensors"]}) # {rank: files}
+loader.add_filenames({0: [f"a_paddle.safetensors", "b_paddle.safetensors"]}) # {rank: files}
 
 # load a.safetensors to rank 0 GPU and b.safetensors to rank 1 GPU
 fb = loader.copy_files_to_device()
