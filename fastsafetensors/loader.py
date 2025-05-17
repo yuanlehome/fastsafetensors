@@ -4,7 +4,6 @@
 import torch
 import torch.distributed as dist
 import paddle
-import paddle.distributed as pdist
 import os
 import math
 from . import cpp as fstcpp
@@ -47,9 +46,13 @@ class SafeTensorsFileLoader:
         self.meta: Dict[str, Tuple[SafeTensorsMetadata, int]] = {}
         self.need_gds_close = False
         self.frames: OrderedDict[str, TensorFrame] = {}
-        self.pg = pg
-        self.nogds = nogds
         self.framework = framework
+        if self.framework == "pytorch" or isinstance(pg, SingleGroup):
+            self.pg = pg
+        elif self.framework == "paddle":
+            self.pg = pg.process_group
+            self.group = pg
+        self.nogds = nogds
         global initialized
         if not initialized:
             fstcpp.load_nvidia_functions()
@@ -149,7 +152,11 @@ class SafeTensorsFileLoader:
             lidx += 1
         for factory in need_wait:
             factory.wait_io(dtype=dtype, noalign=self.nogds)
-        return FilesBufferOnDevice(factories, pg=self.pg)
+        if self.framework == "pytorch":
+            return FilesBufferOnDevice(factories, pg=self.pg)
+        elif self.framework == "paddle":
+            return FilesBufferOnDevice(factories, pg=self.group, framework=self.framework)
+        return None
 
 class fastsafe_open:
     """
