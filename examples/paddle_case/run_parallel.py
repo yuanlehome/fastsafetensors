@@ -13,14 +13,13 @@
 import paddle
 import paddle.distributed as dist
 from fastsafetensors import SafeTensorsFileLoader
-dist.init_parallel_env()
-word_size = dist.get_world_size()
-pg = dist.new_group(range(word_size))
+pg = dist.init_parallel_env()
+pg = dist.new_group(ranks=[0,1], backend="nccl")
 device = "gpu:0" if paddle.is_compiled_with_cuda() else "cpu"
 loader = SafeTensorsFileLoader(pg, device, nogds=True, debug_log=True, framework="paddle")
-loader.add_filenames({0: [f"a_paddle.safetensors", "b_paddle.safetensors"]}) # {rank: files}
+loader.add_filenames({0: ["a_paddle.safetensors"], 1:["b_paddle.safetensors"]}) # {rank: files}
 
-# load a.safetensors to rank 0 GPU and b.safetensors to rank 1 GPU
+# # load a.safetensors to rank 0 GPU and b.safetensors to rank 1 GPU
 fb = loader.copy_files_to_device()
 
 # every rank must call get_tensor and get_sharded in the same order since they internally call torch.distributed collective ops

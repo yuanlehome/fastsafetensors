@@ -49,6 +49,7 @@ class SafeTensorsFileLoader:
         self.framework = framework
         if self.framework == "pytorch" or isinstance(pg, SingleGroup):
             self.pg = pg
+            self.group = pg
         elif self.framework == "paddle":
             self.pg = pg.process_group
             self.group = pg

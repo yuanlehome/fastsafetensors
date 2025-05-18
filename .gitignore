@@ -9,3 +9,4 @@ htmlcov/
 .vscode
 *.log
 *.pyc
+examples/paddle_case/log
