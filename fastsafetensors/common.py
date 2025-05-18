@@ -166,12 +166,12 @@ class SafeTensorsMetadata:
                     t2.copy_(t3)
                     self.tensors[tensor_name].dtype = dtype
             elif self.framework == "paddle":
-                t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, t.dtype, device))
+                t2 = paddle.utils.dlpack.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, t.dtype, device))
                 if dtype is not None and dtype != t.dtype:
                     if paddle_core.size_of_dtype(dtype) > paddle_core.size_of_dtype(t.dtype):
                         raise Exception(f"Online type conversion to larger sizes is not supported ({t.dtype} -> {dtype})")
                     t3 = t2.to(dtype=dtype)
-                    t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, dtype, device))
+                    t2 = paddle.utils.dlpack.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, dtype, device))
                     t2.copy_(t3)
                     self.tensors[tensor_name].dtype = dtype
             ret[tensor_name] = t2
