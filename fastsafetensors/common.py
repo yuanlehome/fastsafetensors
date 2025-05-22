@@ -25,9 +25,16 @@ framework_index = {
     "paddle": 2,
 }
 dtype_convert = {
-    'BOOL': (1, torch.bool, paddle.bool), 'U8': (1, torch.uint8, paddle.uint8), 'I8': (1, torch.int8, paddle.int8), 'F8_E5M2': (1, torch.float, paddle.float8_e5m2), 'F8_E4M3': (1, torch.int8, paddle.int8),
+    'BOOL': (1, torch.bool, paddle.bool), 'U8': (1, torch.uint8, paddle.uint8), 'I8': (1, torch.int8, paddle.int8), 'F8_E5M2': (1, torch.float8_e5m2, paddle.float8_e5m2), 'F8_E4M3': (1, torch.float8_e4m3fn, paddle.float8_e4m3fn),
     'I16': (2, torch.int16, paddle.int16), 'U16': (2, torch.int16, paddle.int16), 'I32': (4, torch.int32, paddle.int32), 'U32': (4, torch.int32, paddle.int32), 'I64': (8, torch.int64, paddle.int64), 'U64': (8, torch.int64, paddle.int64),
     'F16': (2, torch.float16, paddle.float16), 'BF16': (2, torch.bfloat16, paddle.bfloat16), 'F32': (4, torch.float32, paddle.float32), 'F64': (8, torch.float64, paddle.float64)
+}
+
+need_workaround_dtypes = {
+    torch.float8_e5m2: torch.int8,
+    torch.float8_e4m3fn: torch.int8,
+    paddle.float8_e5m2 : paddle.int8,
+    paddle.float8_e4m3fn : paddle.int8
 }
 
 def str_to_dtype(dtype_str: str, framework: str="pytorch")->torch.dtype:
@@ -52,13 +59,15 @@ def get_device_numa_node(device: int):
         return int(f.read().strip())
 
 def alloc_tensor_memory(length: int, dev: torch.device, framework: str="pytorch")->fstcpp.gds_device_buffer:
+    dev_is_gpu = True
     if framework == "pytorch" and dev.type == 'cuda':
         rbuf = torch.cuda.caching_allocator_alloc(length)
     elif framework == "paddle" and "gpu" in dev:
         rbuf = fstcpp.gpu_malloc(length)
     else:
+        dev_is_gpu = False
         rbuf = fstcpp.cpu_malloc(length)
-    return fstcpp.gds_device_buffer(rbuf, length)
+    return fstcpp.gds_device_buffer(rbuf, length, dev_is_gpu)
 
 def free_tensor_memory(gbuf: fstcpp.gds_device_buffer, dev: torch.device, framework: str="pytorch"):
     if framework =="pytorch" and dev.type == 'cuda':
@@ -157,21 +166,33 @@ class SafeTensorsMetadata:
         for tensor_name, t in self.tensors.items():
             dst_dev_ptr = gbuf.get_base_address() + self.header_length + t.data_offsets[0]-copy_start_offset
             if self.framework == "pytorch":
-                t2 = torch.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, t.dtype, device))
+                if t.dtype in need_workaround_dtypes:
+                    t2 = torch.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, need_workaround_dtypes[t.dtype], device)).view(t.dtype)
+                else:
+                    t2 = torch.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, t.dtype, device))
                 if dtype is not None and dtype != t.dtype:
                     if dtype.itemsize > t.dtype.itemsize:
                         raise Exception(f"Online type conversion to larger sizes is not supported ({t.dtype} -> {dtype})")
                     t3 = t2.to(dtype=dtype)
-                    t2 = torch.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, dtype, device))
+                    if dtype in need_workaround_dtypes:
+                        t2 = torch.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, need_workaround_dtypes[dtype], device)).view(dtype)
+                    else:
+                        t2 = torch.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, dtype, device))
                     t2.copy_(t3)
                     self.tensors[tensor_name].dtype = dtype
             elif self.framework == "paddle":
-                t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, t.dtype, device))
+                if t.dtype in need_workaround_dtypes:
+                    t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, need_workaround_dtypes[t.dtype], device))
+                else:
+                    t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, t.dtype, device))
                 if dtype is not None and dtype != t.dtype:
                     if paddle_core.size_of_dtype(dtype) > paddle_core.size_of_dtype(t.dtype):
                         raise Exception(f"Online type conversion to larger sizes is not supported ({t.dtype} -> {dtype})")
                     t3 = t2.to(dtype=dtype)
-                    t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, dtype, device))
+                    if t.dtype in need_workaround_dtypes:
+                        t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, need_workaround_dtypes[dtype], device))
+                    else:
+                        t2 = paddle.from_dlpack(from_cuda_buffer(dst_dev_ptr, t.shape, t.strides, dtype, device))
                     t2.copy_(t3)
                     self.tensors[tensor_name].dtype = dtype
             ret[tensor_name] = t2
