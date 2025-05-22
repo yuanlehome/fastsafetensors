@@ -17,7 +17,7 @@ dist.init_parallel_env()
 backend = "nccl" if paddle.is_compiled_with_cuda() else "gloo"
 pg = dist.new_group(ranks=[0,1], backend=backend)
 device = "gpu:0" if paddle.is_compiled_with_cuda() else "cpu"
-loader = SafeTensorsFileLoader(pg, device, nogds=True, debug_log=True, framework="paddle")
+loader = SafeTensorsFileLoader(pg, device, nogds=False, debug_log=True, framework="paddle")
 loader.add_filenames({0: ["a_paddle.safetensors"], 1:["b_paddle.safetensors"]}) # {rank: files}
 
 # load a.safetensors to rank 0 GPU and b.safetensors to rank 1 GPU
